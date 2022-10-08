@@ -1,0 +1,166 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  Ec2ImageId:
+    Type: String
+    Default: ami-01154243795368525
+  Ec2InstanceType:
+    Type: String
+    Default: t2.micro
+
+Resources:
+  #========================================
+  #VPCの作成
+  #========================================
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: "true"
+      EnableDnsHostnames: "true"
+      Tags:
+        - Key: Name
+          Value: ToiRent-vpc
+
+  #=================================
+  # サブネットの作成
+  #=================================
+  PublicSubnet01:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.10.0/24
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref VPC
+      AvailabilityZone: ap-northeast-1a
+      Tags:
+        - Key: Name
+          Value: ToiRent-public-subnet01
+
+  PrivateSubnet01:
+    Type: AWS::EC2::Subnet
+    Properties:
+      CidrBlock: 10.0.20.0/24
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref VPC
+      AvailabilityZone: ap-northeast-1a
+      Tags:
+        - Key: Name
+          Value: ToiRent-private-subnet01
+
+  #=================================
+  # インターネットゲートウェイの作成
+  #=================================
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: ToiRent-internet-gateway
+
+  AttachInternetGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  #=================================
+  # ルートテーブルの作成
+  #=================================
+  RouteTableForPublicSubnet:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: ToiRent-public-route-table01
+  RouteForPublicSubnet:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref RouteTableForPublicSubnet
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  AssocciateRouteTableForPublicSubnet:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref RouteTableForPublicSubnet
+      SubnetId: !Ref PublicSubnet01
+
+  #=================================
+  # セキュリティグループの作成
+  #=================================
+  SecurityGroupForPublicServer:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: security-group-for-public-server
+      GroupDescription: security-group-for-public-server
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: ToiRent-security-group-for-public-server
+
+  SecurityGroupForPrivateServer:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: security-group-for-private-server
+      GroupDescription: security-group-for-private-server
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          SourceSecurityGroupId: !Ref SecurityGroupForPublicServer
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          SourceSecurityGroupId: !Ref SecurityGroupForPublicServer
+      Tags:
+        - Key: Name
+          Value: ToiRent-security-group-for-private-server
+
+  #=================================
+  # インスタンスの作成
+  #=================================
+  PublicServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref Ec2ImageId
+      InstanceType: !Ref Ec2InstanceType
+      KeyName: !Ref Ec2KeyPair
+      NetworkInterfaces:
+        - SubnetId: !Ref PublicSubnet01
+          GroupSet:
+            - !Ref SecurityGroupForPublicServer
+          AssociatePublicIpAddress: true
+          DeviceIndex: 0
+      Tags:
+        - Key: Name
+          Value: ToiRent-public-ec2
+
+  #=================================
+  # sshKeyの作成
+  #=================================
+  Ec2KeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName: ToiRent-ssh-key
+
+  #=================================
+  # ElasticIPアドレスの作成
+  #=================================
+  ElasticIpForPublicServer:
+    Type: AWS::EC2::EIP
+    Properties:
+      InstanceId: !Ref PublicServer
